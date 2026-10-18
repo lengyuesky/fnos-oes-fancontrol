@@ -1,0 +1,13 @@
+* text=auto
+*.py text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.html text eol=lf
+cmd/* text eol=lf
+config/* text eol=lf
+manifest text eol=lf
+app/ui/config text eol=lf
+*.png binary
+*.PNG binary
+*.jpg binary
+*.fpk binary

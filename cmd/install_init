@@ -1,0 +1,11 @@
+#!/bin/sh
+# 安装前验证目标设备，拒绝操作未知硬件。
+if ! tr '\000' '\n' < /sys/firmware/devicetree/base/compatible | grep -qx 'onethingcloud,oes'; then
+    echo '此应用仅支持经过验证的 OneThing Cloud OES。' > "$TRIM_TEMP_LOGFILE"
+    exit 1
+fi
+if [ ! -x /usr/bin/python3 ]; then
+    echo '缺少系统 Python 3，无法启动应用。' > "$TRIM_TEMP_LOGFILE"
+    exit 1
+fi
+exit 0

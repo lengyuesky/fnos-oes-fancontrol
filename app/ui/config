@@ -1,0 +1,1 @@
+{".url":{"oes.fancontrol.Application":{"title":"OES 风扇助手","icon":"images/icon_{0}.png","type":"iframe","protocol":"","gatewayPrefix":"/app/oes-fancontrol","gatewaySocket":"app.sock","url":"/app/oes-fancontrol","allUsers":false,"control":{"accessPerm":"readonly"}}}}

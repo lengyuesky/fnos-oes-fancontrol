@@ -1,0 +1,3 @@
+#!/bin/sh
+# 应用中心生命周期入口。
+exec /usr/bin/python3 "${TRIM_APPDEST}/setup_service.py" "$1"
