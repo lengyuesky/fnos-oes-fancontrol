@@ -1,4 +1,4 @@
-"""验证过热保护、临时关闭、迟滞和配置拒绝条件。"""
+"""验证过热保护、临时/永久关闭、迟滞和配置拒绝条件。"""
 import sys
 from pathlib import Path
 sys.dont_write_bytecode = True
@@ -18,6 +18,11 @@ assert p.decide(off, [65, 45], [], 100)[0]
 assert p.decide(off, [62, 45], [], 100)[0]
 assert not p.decide(off, [59, 45], [], 100)[0]
 assert p.decide(off, [45, 45], [55], 100)[0]
+off_permanent = dict(DEFAULTS, mode="off", off_permanent=True)
+p = Policy()
+assert not p.decide(off_permanent, [45, 45], [], 10000)[0]
+assert p.decide(off_permanent, [66, 45], [], 10000)[0]
+assert p.decide(off_permanent, [None, 45], [], 10000)[0]
 p = Policy()
 p.on = False
 assert not p.decide(DEFAULTS, [43, 43], [], 100)[0]
@@ -25,11 +30,17 @@ p.applied(True, 100)
 assert p.decide(DEFAULTS, [38, 38], [], 110)[0]
 assert not p.decide(DEFAULTS, [38, 38], [], 161)[0]
 for change in ({"mode": "bad"}, {"on_temp": 40}, {"on_temp": True},
-               {"min_on": 0}, {"script": "anything"}, {"off_temp": 50}):
+               {"min_on": 0}, {"script": "anything"}, {"off_temp": 50},
+               {"off_minutes": 0}, {"off_minutes": 1441},
+               {"off_permanent": 1}, {"off_minutes": "30"}):
     try:
         validate(change, DEFAULTS)
         raise AssertionError("非法配置被接受")
     except ValueError:
         pass
 assert validate({"on_temp": 50, "off_temp": 45}, DEFAULTS)["on_temp"] == 50
+assert validate({"off_minutes": 30}, DEFAULTS)["off_minutes"] == 30
+permanent = validate({"mode": "off", "off_permanent": True}, DEFAULTS)
+assert permanent["off_permanent"] is True
+assert validate({"mode": "on"}, permanent)["off_permanent"] is False
 print("温控边界测试通过")

@@ -1,6 +1,7 @@
 """仅使用已核对设备树的 OES 风扇 GPIO，不猜测引脚。"""
 import glob
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -150,9 +151,15 @@ class Controller:
         file = directory / "settings.json"
         if file.exists():
             self.config = validate(json.loads(file.read_text()), self.config)
-        if self.config["mode"] == "off":
-            self.config["mode"] = "auto"
         self.policy = Policy()
+        if self.config["mode"] == "off":
+            if self.config["off_permanent"]:
+                self.policy.off_until = math.inf
+            else:
+                # 临时关闭不跨应用重启；永久关闭保留。
+                self.config["mode"] = "auto"
+                self.config["off_permanent"] = False
+                atomic(directory / "settings.json", self.config)
         self.policy.since = time.monotonic()
         self.history = deque(maxlen=720)
         self.events = deque(maxlen=30)
@@ -162,7 +169,8 @@ class Controller:
 
     def tick(self):
         now = time.monotonic()
-        if self.config["mode"] == "off" and now >= self.policy.off_until:
+        if (self.config["mode"] == "off" and not self.config["off_permanent"]
+                and now >= self.policy.off_until):
             self.config["mode"] = "auto"
             atomic(self.directory / "settings.json", self.config)
         soc, disks = temperatures()
@@ -176,7 +184,8 @@ class Controller:
         self.state = {"cpu": soc[0], "ddr": soc[1], "disks": disks,
                       "on": on, "reason": reason, "config": self.config,
                       "emergency": self.policy.emergency,
-                      "off_remaining": max(0, int(self.policy.off_until - now)) if self.config["mode"] == "off" else 0,
+                      "off_remaining": (max(0, int(self.policy.off_until - now))
+                                        if self.config["mode"] == "off" and not self.config["off_permanent"] else 0),
                       "chip": self.hw.chip, "line": self.hw.line,
                       "time": int(time.time()), "model": "OneThing Cloud OES · A311D"}
         if now - self.last_history >= 60:
@@ -188,10 +197,16 @@ class Controller:
             return dict(self.state, history=list(self.history), events=list(self.events))
         if isinstance(data, dict) and set(data) == {"action", "settings"} and data["action"] == "configure":
             config = validate(data["settings"], self.config)
+            changed = set(data["settings"])
             atomic(self.directory / "settings.json", config)
-            if data["settings"].get("mode") == "off":
-                self.policy.off_until = time.monotonic() + 600
             self.config = config
+            if config["mode"] == "off":
+                if config["off_permanent"]:
+                    self.policy.off_until = math.inf
+                elif changed & {"mode", "off_minutes", "off_permanent"}:
+                    self.policy.off_until = time.monotonic() + config["off_minutes"] * 60
+            else:
+                self.policy.off_until = 0
             self.tick()
             return self.request({"action": "status"})
         raise ValueError("不支持的请求")

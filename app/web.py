@@ -35,7 +35,7 @@ class Server(socketserver.ThreadingMixIn, HTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "OESFan/1.0"
+    server_version = "OESFan/1.0.2"
 
     def setup(self):
         self.request.settimeout(8)

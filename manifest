@@ -1,7 +1,7 @@
 appname               = oes.fancontrol
-version               = 1.0.1
+version               = 1.0.2
 display_name          = OES 风扇助手
-desc                  = OneThing Cloud OES 自动温控、风扇开关和过热保护；两档开关，无测速反馈，停止后恢复系统控制。
+desc                  = OneThing Cloud OES 自动温控、风扇开关和过热保护；支持定时或永久关闭，两档开关，无测速反馈，停止后恢复系统控制。
 platform              = arm
 source                = thirdparty
 maintainer            = 本地定制

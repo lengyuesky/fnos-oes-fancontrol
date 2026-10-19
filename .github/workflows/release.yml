@@ -1,0 +1,80 @@
+name: Release FPK
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify tag matches manifest
+        run: |
+          version=$(sed -n 's/^version[[:space:]]*=[[:space:]]*//p' manifest)
+          tag="${GITHUB_REF_NAME#v}"
+          if [ -z "$version" ] || [ "$tag" != "$version" ]; then
+            echo "标签 ${GITHUB_REF_NAME} 与 manifest 版本 ${version:-<空>} 不一致" >&2
+            exit 1
+          fi
+          echo "标签 ${GITHUB_REF_NAME} 对应 manifest 版本 ${version}"
+
+      - name: Run tests
+        run: |
+          python3 tools/test_policy.py
+          python3 tools/test_controller.py
+
+      - name: Install fnpack 1.2.3
+        run: |
+          curl -fsSL --retry 3 --retry-delay 2 -o "$RUNNER_TEMP/fnpack" \
+            https://raw.githubusercontent.com/fnnas-apps/fnpack/ea254f2f0ec7fa88faf157a38c242b74d59766d1/archives/fnpack-1.2.3-linux-amd64
+          echo "54b97fa7b70968c4d05c79840f5daeff508957d0bb2062fdb0376d00d9615c93  $RUNNER_TEMP/fnpack" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/fnpack"
+          ls -l "$RUNNER_TEMP/fnpack"
+
+      - name: Build FPK
+        run: |
+          python3 tools/build.py --fnpack "$RUNNER_TEMP/fnpack"
+          version=$(sed -n 's/^version[[:space:]]*=[[:space:]]*//p' manifest)
+          fpk="dist/oes-fancontrol_${version}_arm.fpk"
+          test -s "$fpk"
+          mkdir -p release
+          cp "$fpk" release/
+          (cd release && sha256sum "$(basename "$fpk")" > SHA256SUMS)
+          cat release/SHA256SUMS
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oes-fancontrol-fpk
+          path: release/*
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: |
+            release/*.fpk
+            release/SHA256SUMS
+          generate_release_notes: true
+          fail_on_unmatched_files: true
