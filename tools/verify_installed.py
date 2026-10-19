@@ -40,7 +40,16 @@ assert request("POST", {"mode": "off"})[0] == 403
 assert request("POST", {"off_temp": 55}, csrf=token)[0] == 400
 assert request("POST", {"mode": "off", "off_minutes": 0}, csrf=token)[0] == 400
 assert request()[1]["data"]["config"] == before
-assert request("POST", {"mode": "on"}, csrf=token)[1]["data"]["on"]
+state = request("POST", {"mode": "on", "on_speed": 60, "on_period": 2}, csrf=token)[1]["data"]
+assert state["on"] and state["config"]["on_speed"] == 60
+assert state["config"]["on_period"] == 2.0
+assert request("POST", {"on_speed": 101}, csrf=token)[0] == 400
+assert request("POST", {"on_period": 0.09}, csrf=token)[0] == 400
+assert request("POST", {"on_period": 10.1}, csrf=token)[0] == 400
+assert request()[1]["data"]["config"]["on_speed"] == 60
+assert request()[1]["data"]["config"]["on_period"] == 2.0
+state = request("POST", {"on_period": 0.5}, csrf=token)[1]["data"]
+assert state["config"]["on_period"] == 0.5
 state = request("POST", {"mode": "off"}, csrf=token)[1]["data"]
 assert not state["on"] and state["off_remaining"] > 590
 state = request("POST", {"mode": "off", "off_minutes": 30}, csrf=token)[1]["data"]
@@ -49,7 +58,7 @@ state = request("POST", {"mode": "off", "off_permanent": True}, csrf=token)[1]["
 assert not state["on"] and state["config"]["off_permanent"] and state["off_remaining"] == 0
 state = request("POST", {"mode": "auto"}, csrf=token)[1]["data"]
 assert state["config"]["mode"] == "auto" and not state["config"]["off_permanent"]
-print("鉴权、CSRF、非法配置拒绝、定时/永久关闭和自动模式验证通过", flush=True)
+print("鉴权、CSRF、非法配置拒绝、常开调速、定时/永久关闭和自动模式验证通过", flush=True)
 old_pid = subprocess.check_output(["systemctl", "show", "oes-fan-hardware", "-p", "MainPID", "--value"], text=True).strip()
 subprocess.run(["systemctl", "kill", "--signal=SIGKILL", "--kill-whom=main", "oes-fan-hardware"], check=True)
 for _ in range(30):

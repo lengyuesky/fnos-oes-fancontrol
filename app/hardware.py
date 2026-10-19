@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 from collections import deque
-from control import DEFAULTS, Policy, validate
+from control import DEFAULTS, Policy, duty_on, validate
 
 DRIVER = Path("/sys/bus/platform/drivers/gpio-fan")
 DEVICE = Path("/sys/bus/platform/devices/gpio-fan")
@@ -161,6 +161,8 @@ class Controller:
                 self.config["off_permanent"] = False
                 atomic(directory / "settings.json", self.config)
         self.policy.since = time.monotonic()
+        self.speed_since = time.monotonic()
+        self.output_on = None
         self.history = deque(maxlen=720)
         self.events = deque(maxlen=30)
         self.last_history = 0
@@ -175,31 +177,48 @@ class Controller:
             atomic(self.directory / "settings.json", self.config)
         soc, disks = temperatures()
         on, reason = self.policy.decide(self.config, soc, disks, now)
-        self.hw.set(on)
         if on != self.policy.on or reason != self.state.get("reason"):
             event = {"time": int(time.time()), "on": on, "reason": reason}
             self.events.append(event)
             print(json.dumps(event, ensure_ascii=False), flush=True)
         self.policy.applied(on, now)
         self.state = {"cpu": soc[0], "ddr": soc[1], "disks": disks,
-                      "on": on, "reason": reason, "config": self.config,
-                      "emergency": self.policy.emergency,
+                      "on": on, "output_on": self.output_on, "reason": reason,
+                      "config": self.config, "emergency": self.policy.emergency,
                       "off_remaining": (max(0, int(self.policy.off_until - now))
                                         if self.config["mode"] == "off" and not self.config["off_permanent"] else 0),
                       "chip": self.hw.chip, "line": self.hw.line,
                       "time": int(time.time()), "model": "OneThing Cloud OES · A311D"}
+        self.pulse()
         if now - self.last_history >= 60:
             self.history.append({"time": int(time.time()), "cpu": soc[0], "ddr": soc[1], "on": on})
             self.last_history = now
+
+    def pulse(self):
+        if not self.state:
+            return
+        output_on = self.state["on"]
+        if self.state["reason"].startswith("手动常开") and self.config["on_speed"] < 100:
+            output_on = duty_on(time.monotonic(), self.speed_since,
+                                self.config["on_speed"], self.config["on_period"])
+        self.state["output_on"] = output_on
+        if output_on != self.output_on:
+            self.hw.set(output_on)
+            self.output_on = output_on
 
     def request(self, data):
         if data == {"action": "status"}:
             return dict(self.state, history=list(self.history), events=list(self.events))
         if isinstance(data, dict) and set(data) == {"action", "settings"} and data["action"] == "configure":
+            previous = self.config
             config = validate(data["settings"], self.config)
             changed = set(data["settings"])
             atomic(self.directory / "settings.json", config)
             self.config = config
+            if (config["mode"] == "on"
+                    and (previous["mode"] != "on" or previous["on_speed"] != config["on_speed"]
+                         or previous["on_period"] != config["on_period"])):
+                self.speed_since = time.monotonic()
             if config["mode"] == "off":
                 if config["off_permanent"]:
                     self.policy.off_until = math.inf
@@ -241,7 +260,7 @@ def serve(directory, uid, gid):
         server = socketserver.UnixStreamServer(str(path), Handler)
         os.chown(path, 0, gid)
         os.chmod(path, 0o660)
-        server.timeout = 1
+        server.timeout = 0.01
         alive = True
 
         def stop(*_):
@@ -251,10 +270,15 @@ def serve(directory, uid, gid):
         signal.signal(signal.SIGTERM, stop)
         signal.signal(signal.SIGINT, stop)
         last_tick = 0
+        last_pulse = 0
         while alive:
-            if time.monotonic() - last_tick >= 2:
+            now = time.monotonic()
+            if now - last_tick >= 2:
                 controller.tick()
-                last_tick = time.monotonic()
+                last_tick = now
+            if now - last_pulse >= 0.01:
+                controller.pulse()
+                last_pulse = now
             server.handle_request()
     finally:
         if server:

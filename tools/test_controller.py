@@ -1,4 +1,4 @@
-"""验证定时关闭到点恢复、永久关闭跨重启保留。"""
+"""验证定时关闭、永久关闭和常开间歇调速。"""
 import sys
 import tempfile
 import time
@@ -66,4 +66,91 @@ with tempfile.TemporaryDirectory() as temporary:
     assert restarted.config["off_permanent"] is False
     assert restarted.state["on"] is True
 
-print("关闭时长与永久关闭测试通过")
+with tempfile.TemporaryDirectory() as temporary:
+    directory = Path(temporary)
+    hw = FakeHardware()
+    controller = hardware.Controller(directory, hw)
+    state = configure(controller, {"mode": "on", "on_speed": 60})
+    assert state["config"]["on_speed"] == 60
+    assert state["config"]["on_period"] == 1.0
+    assert state["on"] is True
+    assert state["reason"] == "手动常开 · 转速 60%"
+    assert state["output_on"] is True
+
+    restarted = hardware.Controller(directory, FakeHardware())
+    assert restarted.config["mode"] == "on"
+    assert restarted.config["on_speed"] == 60
+    assert restarted.config["on_period"] == 1.0
+    assert restarted.state["output_on"] is True
+
+    controller.speed_since = time.monotonic() - 0.8
+    controller.tick()
+    assert controller.state["output_on"] is False
+    assert hw.values[-1] is False
+    controller.speed_since = time.monotonic() - 0.2
+    controller.tick()
+    assert controller.state["output_on"] is True
+    assert hw.values[-1] is True
+
+    hardware.temperatures = lambda: ([66.0, 45.0], [])
+    controller.speed_since = time.monotonic() - 0.8
+    controller.tick()
+    assert controller.state["output_on"] is True
+    assert controller.state["reason"].startswith("过热保护")
+    hardware.temperatures = lambda: ([45.0, 45.0], [])
+    controller.speed_since = time.monotonic() - 0.8
+    controller.tick()
+    assert controller.state["output_on"] is False
+
+    state = configure(controller, {"on_period": 2.0})
+    assert state["config"]["on_period"] == 2.0
+    assert state["output_on"] is True
+    controller.speed_since = time.monotonic() - 1.3
+    controller.tick()
+    assert controller.state["output_on"] is False
+    controller.speed_since = time.monotonic() - 1.1
+    controller.tick()
+    assert controller.state["output_on"] is True
+    restarted = hardware.Controller(directory, FakeHardware())
+    assert restarted.config["on_period"] == 2.0
+
+    controller.speed_since = time.monotonic() - 1.3
+    controller.tick()
+    assert controller.state["output_on"] is False
+    before = controller.speed_since
+    state = configure(controller, {"on_period": 0.5})
+    assert state["config"]["on_period"] == 0.5
+    assert controller.speed_since > before
+    assert state["output_on"] is True
+    controller.speed_since = time.monotonic() - 0.4
+    controller.tick()
+    assert controller.state["output_on"] is False
+
+    state = configure(controller, {"on_period": 0.1})
+    assert state["config"]["on_period"] == 0.1
+    controller.speed_since = time.monotonic() - 0.08
+    controller.tick()
+    assert controller.state["output_on"] is False
+    controller.speed_since = time.monotonic() - 0.02
+    controller.tick()
+    assert controller.state["output_on"] is True
+
+    state = configure(controller, {"mode": "on", "on_speed": 100})
+    assert state["config"]["on_speed"] == 100
+    assert state["output_on"] is True
+    controller.speed_since = time.monotonic() - 0.8
+    controller.tick()
+    assert controller.state["output_on"] is True
+
+    state = configure(controller, {"mode": "on", "on_speed": 0})
+    assert state["config"]["on_speed"] == 0
+    assert state["output_on"] is False
+    assert state["reason"] == "手动常开 · 转速 0%"
+    hardware.temperatures = lambda: ([66.0, 45.0], [])
+    controller.tick()
+    assert controller.state["output_on"] is True
+    hardware.temperatures = lambda: ([45.0, 45.0], [])
+    controller.tick()
+    assert controller.state["output_on"] is False
+
+print("关闭时长、永久关闭与常开调速测试通过")
